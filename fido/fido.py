@@ -3,6 +3,7 @@
 from cStringIO import StringIO
 import json
 import os
+import time
 from urlparse import urlparse
 
 import concurrent.futures
@@ -34,11 +35,13 @@ class Response(object):
     :ivar reason: the http reason phrase.
     """
 
-    def __init__(self, code, headers, body, reason):
+    def __init__(self, code, headers, body, reason, start_timestamp):
         self.headers = dict(headers.getAllRawHeaders())
         self.code = code
         self.body = body
         self.reason = reason
+        self.start_timestamp = start_timestamp
+        self.finish_timestamp = time.time()
 
     def json(self):
         """Helper function to load a JSON response body."""
@@ -47,10 +50,11 @@ class Response(object):
 
 class HTTPBodyFetcher(Protocol):
 
-    def __init__(self, response, finished):
+    def __init__(self, response, finished, start_timestamp):
         self.buffer = StringIO()
         self.response = response
         self.finished = finished
+        self.start_timestamp = start_timestamp
 
     def dataReceived(self, data):
         self.buffer.write(data)
@@ -64,6 +68,7 @@ class HTTPBodyFetcher(Protocol):
                     headers=self.response.headers,
                     body=self.buffer.getvalue(),
                     reason=self.response.phrase,
+                    start_timestamp=self.start_timestamp,
                 )
             )
         else:
@@ -75,6 +80,7 @@ def fetch_inner(url, method, headers, body, future, timeout, connect_timeout):
     work.
     """
 
+    start_timestamp = time.time()
     finished = Deferred()
 
     # Set an exception on the future in case of error
@@ -100,7 +106,8 @@ def fetch_inner(url, method, headers, body, future, timeout, connect_timeout):
 
     # Fetch the body once we've received the headers
     def response_callback(response):
-        response.deliverBody(HTTPBodyFetcher(response, finished))
+        response.deliverBody(
+            HTTPBodyFetcher(response, finished, start_timestamp))
 
     deferred.addCallback(response_callback)
     deferred.addErrback(finished.errback)
